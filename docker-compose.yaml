@@ -239,6 +239,7 @@ services:
     image: ghcr.io/datalens-tech/datalens-ui:0.3831.0
     environment:
       SERVICE_FQDN_DATALENS_8080: ${SERVICE_FQDN_DATALENS_8080}
+      SERVICE_URL_DATALENS_8080: ${SERVICE_URL_DATALENS_8080}
       DATALENS_DOMAIN: ${SERVICE_FQDN_DATALENS}
       APP_MODE: full
       APP_ENV: production
