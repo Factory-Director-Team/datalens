@@ -271,8 +271,6 @@ services:
       AUTH_SIGNUP_DISABLED: ${AUTH_SIGNUP_DISABLED:-false}
     depends_on:
       - us
-    ports:
-      - ${UI_PORT:-8080}:8080
     networks:
       - default
 #
