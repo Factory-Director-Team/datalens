@@ -162,7 +162,8 @@ services:
   #
   ui-api:
     container_name: datalens-ui-api
-    image: ghcr.io/datalens-tech/datalens-ui:0.3831.0
+    image: ${UI_IMAGE:-ghcr.io/factory-director-team/datalens-ui:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-always}
     environment:
       APP_MODE: api
       APP_ENV: production
@@ -236,7 +237,8 @@ services:
   #
   ui:
     container_name: datalens-ui
-    image: ghcr.io/datalens-tech/datalens-ui:0.3831.0
+    image: ${UI_IMAGE:-ghcr.io/factory-director-team/datalens-ui:latest}
+    pull_policy: ${IMAGE_PULL_POLICY:-always}
     environment:
       SERVICE_FQDN_DATALENS_8080: ${SERVICE_FQDN_DATALENS_8080}
       SERVICE_URL_DATALENS_8080: ${SERVICE_URL_DATALENS_8080}
