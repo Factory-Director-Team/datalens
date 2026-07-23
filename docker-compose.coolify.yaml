@@ -1,0 +1,297 @@
+# DataLens on Coolify — MANAGED-services model (Option A).
+# ---------------------------------------------------------------------------
+# Deploy this as a Coolify "Docker Compose" application resource. PostgreSQL is
+# NOT in this file — it is a SEPARATE Coolify **Managed PostgreSQL** resource.
+#
+# Research & rationale (read before changing anything):
+#   docs/research/coolify-managed-services-deployment.md   (managed model, this file)
+#   docs/research/coolify-deployment-docker-compose.md      (compose-buildpack fundamentals)
+#
+# Adapted from datalens/docker-compose.yaml. Changes vs that prod file:
+#   - REMOVED the `postgres` service entirely -> it is a Coolify Managed PostgreSQL
+#     resource whose Image is overridden to ghcr.io/datalens-tech/datalens-postgres:16
+#     (so it still bootstraps all 7 DBs + extensions). Must NOT be left on the default
+#     postgres:16-alpine (musl lacks en_US.utf8 -> CREATE DATABASE ... LC_COLLATE fails).
+#   - REMOVED every `depends_on: postgres` (the DB is an external managed resource;
+#     services retry until it is reachable — create/start the DB BEFORE deploying this).
+#   - REMOVED all `networks:` and the top-level `volumes:` (the DB volume belongs to the
+#     managed resource; Coolify manages the stack network). Custom networks cause 504s.
+#   - REMOVED `container_name:` and host `ports:` (inter-service DNS uses service names).
+#   - App images are our PRIVATE fork builds (ghcr.io/factory-director-team/*);
+#     temporal/meta-manager/auth stay on the public upstream images. Postgres image lives
+#     on the managed resource, not here.
+#   - `ui` is the ONLY public service (SERVICE_FQDN_UI_8080 -> managed domain + SSL).
+#   - opaque IN-STACK secrets -> Coolify magic SERVICE_PASSWORD_*; cross-resource values
+#     (POSTGRES_HOST/POSTGRES_PASSWORD) and key material -> operator-supplied required (:?).
+#   - added `restart: unless-stopped`.
+#
+# OPERATOR PREREQUISITES (do these BEFORE the first deploy):
+#   1. `docker login ghcr.io` on the Coolify server AS ITS SSH USER (read:packages PAT) —
+#      the fork images below are PRIVATE; Coolify pulls them via ~/.docker/config.json.
+#   2. Create the Managed PostgreSQL: Image=ghcr.io/datalens-tech/datalens-postgres:16,
+#      postgres_user=pg-user, a strong password, postgres_db=pg-us-db, and add the
+#      POSTGRES_DB_* / INIT_DB_* / INIT_DEMO_DATA=0 / CONTROL_API_CRYPTO_KEY custom env
+#      (see the research note §4.3 Option A). Start it; confirm the 7 DBs were created.
+#   3. On THIS compose resource: Advanced -> enable "Connect to Predefined Network".
+#   4. Set env on THIS resource: POSTGRES_HOST=<managed-db-UUID> (from its Internal URL),
+#      POSTGRES_PASSWORD=<same as the managed DB>, plus every required (:?) secret below
+#      (RSA/crypto keys with the Multiline flag). Set a wildcard domain on the server.
+#
+# Image tags: fork images are tagged latest / main / sha-<short>. Defaults below use
+# `latest`; PIN to an immutable `sha-<short>` per repo in production. control-api and
+# data-api share the datalens-backend tag; ui and ui-api share the datalens-ui tag.
+# ---------------------------------------------------------------------------
+
+services:
+
+  temporal:
+    image: ghcr.io/datalens-tech/datalens-temporal:1.27.2   # upstream (no fork); datastore = managed PG
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/etc/temporal/healthcheck.sh"]
+      interval: 10s
+      retries: 6
+      timeout: 5s
+      start_period: 3s
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST:?}                 # managed DB UUID (copy its Internal URL host)
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_USER: ${POSTGRES_USER:-pg-user}
+      POSTGRES_DB: ${POSTGRES_DB_TEMPORAL:-pg-temporal-db}
+      POSTGRES_DB_VISIBILITY: ${POSTGRES_DB_TEMPORAL_VISIBILITY:-pg-temporal-visibility-db}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}         # must equal the managed DB's password
+      #
+      POSTGRES_TLS_ENABLED: ${POSTGRES_TLS_ENABLED:-false}
+      POSTGRES_TLS_DISABLE_HOST_VERIFICATION: ${POSTGRES_TLS_DISABLE_HOST_VERIFICATION:-true}
+      POSTGRES_TLS_CA_FILE: ${POSTGRES_TLS_CA_FILE:-}
+      #
+      TEMPORAL_AUTH_ENABLED: ${TEMPORAL_AUTH_ENABLED:-true}
+      TEMPORAL_AUTH_PUBLIC_KEY: ${TEMPORAL_AUTH_PUBLIC_KEY:?}     # multiline
+      TEMPORAL_AUTH_PRIVATE_KEY: ${TEMPORAL_AUTH_PRIVATE_KEY:?}   # multiline; matches meta-manager
+      #
+      NAMESPACES: meta-manager
+
+  control-api:
+    image: ghcr.io/factory-director-team/datalens-control-api:${FORK_TAG_BACKEND:-latest}   # PRIVATE fork
+    restart: unless-stopped
+    healthcheck:                                   # Python image ships curl (target_base_run)
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/v1/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    environment:
+      BI_API_UWSGI_WORKERS_COUNT: 4
+      RQE_FORCE_OFF: 1
+      RQE_SECRET_KEY: ""
+      #
+      DL_CRY_ACTUAL_KEY_ID: KEY
+      DL_CRY_KEY_VAL_ID_KEY: ${CONTROL_API_CRYPTO_KEY:?}    # stack crypto key (also set on the managed DB)
+      #
+      US_HOST: http://us:8080
+      #
+      US_MASTER_TOKEN: ${SERVICE_PASSWORD_USMASTERTOKEN}
+      US_DYNAMIC_AUTH_PRIVATE_KEY: ${BI_DYNAMIC_US_AUTH_PRIVATE_KEY:?}   # multiline; matches us BI public
+      #
+      CONNECTOR_AVAILABILITY_VISIBLE: clickhouse,postgres,chyt,ydb,mysql,greenplum,mssql,oracle,trino,appmetrica_api,metrika_api
+      #
+      AUTH__TYPE: ${AUTH_TYPE:-NATIVE}
+      AUTH__JWT_ALGORITHM: 'PS256'
+      AUTH__JWT_KEY: ${AUTH_TOKEN_PUBLIC_KEY:?}             # multiline
+
+  data-api:
+    image: ghcr.io/factory-director-team/datalens-data-api:${FORK_TAG_BACKEND:-latest}      # PRIVATE fork
+    restart: unless-stopped
+    healthcheck:                                   # Python image ships curl (target_base_run)
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/ping"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    environment:
+      GUNICORN_WORKERS_COUNT: 5
+      RQE_FORCE_OFF: 1
+      CACHES_ON: 0
+      MUTATIONS_CACHES_ON: 0
+      RQE_SECRET_KEY: ""
+      #
+      DL_CRY_ACTUAL_KEY_ID: KEY
+      DL_CRY_KEY_VAL_ID_KEY: ${CONTROL_API_CRYPTO_KEY:?}
+      #
+      BI_COMPENG_PG_ON: 1
+      BI_COMPENG_PG_URL: "postgres://${POSTGRES_USER:-pg-user}:${POSTGRES_PASSWORD:?}@${POSTGRES_HOST:?}:${POSTGRES_PORT:-5432}/${POSTGRES_DB_COMPENG:-pg-compeng-db}${POSTGRES_ARGS:-}"
+      #
+      US_HOST: http://us:8080
+      #
+      US_MASTER_TOKEN: ${SERVICE_PASSWORD_USMASTERTOKEN}
+      US_DYNAMIC_AUTH_PRIVATE_KEY: ${BI_DYNAMIC_US_AUTH_PRIVATE_KEY:?}   # multiline
+      #
+      AUTH__TYPE: ${AUTH_TYPE:-NATIVE}
+      AUTH__JWT_ALGORITHM: 'PS256'
+      AUTH__JWT_KEY: ${AUTH_TOKEN_PUBLIC_KEY:?}             # multiline
+
+  us:
+    image: ghcr.io/factory-director-team/datalens-us:${FORK_TAG_US:-latest}                 # PRIVATE fork
+    restart: unless-stopped
+    healthcheck:                                   # Node image (no curl) -> use node; /ping = index.ts
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/ping',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s                            # US runs DB migrations on boot
+    environment:
+      APP_INSTALLATION: opensource
+      APP_ENV: prod
+      APP_PORT: 8080
+      #
+      AUTH_ENDPOINT: http://auth:8080
+      #
+      MASTER_TOKEN: ${SERVICE_PASSWORD_USMASTERTOKEN}
+      BI_MASTER_TOKEN_PUBLIC_KEY_PRIMARY: ${BI_DYNAMIC_US_AUTH_PUBLIC_KEY:?}   # multiline; matches control/data-api private
+      UI_MASTER_TOKEN_PUBLIC_KEY_PRIMARY: ${UI_DYNAMIC_US_AUTH_PUBLIC_KEY:?}   # multiline; matches ui private
+      AUTH_MASTER_TOKEN: ${SERVICE_PASSWORD_AUTHMASTERTOKEN}
+      # Same stack crypto key the control/data APIs use; US encrypts the workbook Embedding
+      # secret's private key at rest (ADR 0003).
+      CONTROL_API_CRYPTO_KEY: ${CONTROL_API_CRYPTO_KEY:?}
+      #
+      POSTGRES_DSN_LIST: "postgres://${POSTGRES_USER:-pg-user}:${POSTGRES_PASSWORD:?}@${POSTGRES_HOST:?}:${POSTGRES_PORT:-5432}/${POSTGRES_DB_US:-pg-us-db}${POSTGRES_ARGS:-}"
+      US_SURPRESS_DB_STATUS_LOGS: 'true'
+      #
+      SKIP_INSTALL_DB_EXTENSIONS: 1     # extensions already created by the managed datalens-postgres image
+      USE_DEMO_DATA: 0
+      #
+      HC: ${HC:-0}
+      #
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      AUTH_TOKEN_PUBLIC_KEY: ${AUTH_TOKEN_PUBLIC_KEY:?}    # multiline
+
+  ui-api:
+    image: ghcr.io/factory-director-team/datalens-ui:${FORK_TAG_UI:-latest}                 # PRIVATE fork (same image as ui)
+    restart: unless-stopped
+    healthcheck:                                   # Node image (curl purged) -> use node; /ping = routes.ts
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/ping',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    environment:
+      APP_MODE: api
+      APP_ENV: production
+      APP_INSTALLATION: opensource
+      #
+      US_ENDPOINT: http://us:8080
+      BI_API_ENDPOINT: http://control-api:8080
+    depends_on:
+      - us
+
+  meta-manager:
+    image: ghcr.io/datalens-tech/datalens-meta-manager:0.52.0    # upstream (no fork)
+    restart: unless-stopped
+    healthcheck:                                   # Node image -> use node; /ping = routes/index.ts
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/ping',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    environment:
+      APP_INSTALLATION: opensource
+      APP_ENV: prod
+      APP_PORT: 8080
+      #
+      US_MASTER_TOKEN: ${SERVICE_PASSWORD_USMASTERTOKEN}
+      EXPORT_DATA_VERIFICATION_KEY: ${SERVICE_PASSWORD_EXPORTVERIFY}
+      #
+      POSTGRES_DSN_LIST: "postgres://${POSTGRES_USER:-pg-user}:${POSTGRES_PASSWORD:?}@${POSTGRES_HOST:?}:${POSTGRES_PORT:-5432}/${POSTGRES_DB_META_MANAGER:-pg-meta-manager-db}${POSTGRES_ARGS:-}"
+      #
+      US_ENDPOINT: http://us:8080
+      UI_API_ENDPOINT: http://ui-api:8080
+      #
+      TEMPORAL_ENDPOINT: temporal:7233
+      TEMPORAL_AUTH_ENABLED: ${TEMPORAL_AUTH_ENABLED:-true}
+      TEMPORAL_AUTH_PRIVATE_KEY: ${TEMPORAL_AUTH_PRIVATE_KEY:?}   # multiline; matches temporal
+      #
+      AUTH_ENABLED: ${AUTH_ENABLED:-true}
+      AUTH_TOKEN_PUBLIC_KEY: ${AUTH_TOKEN_PUBLIC_KEY:?}           # multiline
+    depends_on:
+      temporal:
+        condition: service_healthy
+      ui-api:
+        condition: service_started
+
+  auth:
+    image: ghcr.io/datalens-tech/datalens-auth:0.27.0            # upstream (no fork)
+    restart: unless-stopped
+    healthcheck:                                   # Node image -> use node; /ping = routes.ts
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/ping',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    environment:
+      APP_INSTALLATION: opensource
+      APP_ENV: prod
+      #
+      MASTER_TOKEN: ${SERVICE_PASSWORD_AUTHMASTERTOKEN}
+      US_MASTER_TOKEN: ${SERVICE_PASSWORD_USMASTERTOKEN}
+      #
+      POSTGRES_DSN_LIST: "postgres://${POSTGRES_USER:-pg-user}:${POSTGRES_PASSWORD:?}@${POSTGRES_HOST:?}:${POSTGRES_PORT:-5432}/${POSTGRES_DB_AUTH:-pg-auth-db}${POSTGRES_ARGS:-}"
+      US_SURPRESS_DB_STATUS_LOGS: 'true'
+      #
+      SKIP_INSTALL_DB_EXTENSIONS: 1
+      #
+      TOKEN_PRIVATE_KEY: ${AUTH_TOKEN_PRIVATE_KEY:?}   # multiline; signs platform JWTs
+      TOKEN_PUBLIC_KEY: ${AUTH_TOKEN_PUBLIC_KEY:?}     # multiline; matches every AUTH_TOKEN_PUBLIC_KEY above
+      AUTH_ADMIN_PASSWORD: ${AUTH_ADMIN_PASSWORD:?}
+      AUTH_SIGNUP_DISABLED: ${AUTH_SIGNUP_DISABLED:-false}
+      #
+      UI_APP_ENDPOINT: ${SERVICE_URL_UI}               # public UI URL (same host as SERVICE_FQDN_UI)
+      #
+      DISABLE_WILDCARD_COOKIE: 'true'
+
+  ui:
+    image: ghcr.io/factory-director-team/datalens-ui:${FORK_TAG_UI:-latest}                 # PRIVATE fork (same image as ui-api)
+    restart: unless-stopped
+    environment:
+      # ---- PUBLIC ENTRYPOINT: Coolify generates the domain + SSL and routes proxy -> ui:8080 ----
+      - SERVICE_FQDN_UI_8080
+      - APP_MODE=full
+      - APP_ENV=production
+      - APP_INSTALLATION=opensource
+      - AUTH_POLICY=disabled
+      - US_ENDPOINT=http://us:8080
+      - AUTH_ENDPOINT=http://auth:8080
+      - BI_API_ENDPOINT=http://control-api:8080
+      - BI_DATA_ENDPOINT=http://data-api:8080
+      - META_MANAGER_ENDPOINT=http://meta-manager:8080
+      - US_MASTER_TOKEN=${SERVICE_PASSWORD_USMASTERTOKEN}
+      - US_DYNAMIC_MASTER_TOKEN_PRIVATE_KEY=${UI_DYNAMIC_US_AUTH_PRIVATE_KEY:?}   # multiline; matches us UI public
+      - RELEASE_VERSION=2.9.0
+      - HC=${HC:-0}
+      - HC_ENDPOINT=${HC_ENDPOINT:-}
+      - HC_PROTOCOL=${HC_PROTOCOL:-}
+      - HC_MODULES=${HC_MODULES:-}
+      - YANDEX_MAP_ENABLED=${YANDEX_MAP_ENABLED:-0}
+      - YANDEX_MAP_TOKEN=${YANDEX_MAP_TOKEN:-}
+      - EXPORT_WORKBOOK_ENABLED=${EXPORT_WORKBOOK_ENABLED:-true}
+      - AUTH_ENABLED=${AUTH_ENABLED:-true}
+      - AUTH_MASTER_TOKEN=${SERVICE_PASSWORD_AUTHMASTERTOKEN}
+      - AUTH_TOKEN_PUBLIC_KEY=${AUTH_TOKEN_PUBLIC_KEY:?}                          # multiline
+      - AUTH_SIGNUP_DISABLED=${AUTH_SIGNUP_DISABLED:-false}
+      # Private half of the platform auth keypair — lets the BFF sign the anonymous
+      # public-link/embed data-api query so data-api accepts it under AUTH_TYPE=NATIVE.
+      # WITHOUT this, published public links / embeds return 401 on their DATA. The Share
+      # feature stays off by default, so supplying this key exposes nothing on its own.
+      - AUTH_TOKEN_PRIVATE_KEY=${AUTH_TOKEN_PRIVATE_KEY:?}                        # multiline; matches auth TOKEN_PRIVATE_KEY
+    # ui is the ONLY public service: Coolify gates the public route on this healthcheck.
+    # Node hitting /ping (routes.ts) — curl/wget are purged from this image (Dockerfile).
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:8080/ping',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    depends_on:
+      - us
+
+# NO top-level `networks:` — Coolify attaches the predefined network via the UI toggle.
+# NO top-level `volumes:` — the Postgres data volume belongs to the managed DB resource.
