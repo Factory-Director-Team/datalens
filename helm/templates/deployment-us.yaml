@@ -40,6 +40,13 @@ spec:
                 secretKeyRef:
                   name: {{ default "datalens-secrets" .Values.secrets.ref }}
                   key: US_MASTER_TOKEN
+            # Stack crypto key (shared with the control/data APIs) — US uses it to encrypt the
+            # workbook Embedding secret's private key at rest (ADR 0003).
+            - name: CONTROL_API_CRYPTO_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "datalens-secrets" .Values.secrets.ref }}
+                  key: CONTROL_API_CRYPTO_KEY
             - name: POSTGRES_DSN_LIST
               valueFrom:
                 secretKeyRef:

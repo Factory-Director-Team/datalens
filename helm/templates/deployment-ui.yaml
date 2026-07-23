@@ -92,6 +92,16 @@ spec:
                 secretKeyRef:
                   name: {{ default "datalens-secrets" .Values.secrets.ref }}
                   key: AUTH_TOKEN_PUBLIC_KEY
+            # Private half of the platform auth keypair — lets the BFF sign the anonymous
+            # public-link/embed data-api query so data-api accepts it under AUTH_TYPE=NATIVE (without
+            # it, that query 401s). The Share feature stays off by default (Share-dialog flag off +
+            # nothing published), so supplying this key exposes no data on its own — it only lets an
+            # already-published public link / embed render its data.
+            - name: AUTH_TOKEN_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default "datalens-secrets" .Values.secrets.ref }}
+                  key: AUTH_TOKEN_PRIVATE_KEY
             {{- end }}
             {{- if not .Values.features.auth.signup }}
             - name: AUTH_SIGNUP_DISABLED
