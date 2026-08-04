@@ -13,7 +13,8 @@
 # Adapted from datalens/docker-compose.yaml. Changes vs that prod file:
 #   - removed all `networks:` (Coolify manages the stack network; custom nets cause 504s)
 #   - removed `container_name:` (Coolify names containers; inter-service DNS = service names)
-#   - removed host `ports:` (only `ui` is public, via SERVICE_FQDN_UI_8080 -> managed domain + SSL)
+#   - removed host `ports:` (public entrypoints go through SERVICE_FQDN_* -> managed domain + SSL:
+#     `ui` on the domain root, `mcp` on the SAME domain under the /mcp path)
 #   - fork images for control-api/data-api/us/ui/ui-api; upstream for postgres/temporal/meta-manager/auth
 #   - opaque IN-STACK secrets -> Coolify magic SERVICE_PASSWORD_* (same value across the stack)
 #   - RSA key pairs + crypto key + admin password -> operator-supplied required (:?) multiline secrets
@@ -28,10 +29,13 @@
 #   3. Supply every required (:?) secret in the Coolify env UI (RSA/crypto keys = Multiline flag).
 #      Coolify auto-generates the SERVICE_PASSWORD_* values.
 #   4. The `db-postgres` named volume is preserved across redeploys by Coolify automatically.
+#   5. For the `mcp` service: DATALENS_MCP_BEARERS (one `label:token` per consumer) and
+#      DATALENS_MCP_IDENTITY_USER_ID (the BARE encoded id of the DataLens user it reads as —
+#      look it up in the auth DB, or from `entries.created_by` minus the `uid:` prefix).
 #
 # Image tags: fork images are tagged latest / main / sha-<short>. Defaults below use `latest`;
 # PIN to an immutable `sha-<short>` per repo in production. control-api & data-api share the
-# datalens-backend tag; ui & ui-api share the datalens-ui tag.
+# datalens-backend tag; ui & ui-api share the datalens-ui tag; mcp has its own (FORK_TAG_MCP).
 # Rationale & sources: docs/research/coolify-deployment-docker-compose.md
 # ---------------------------------------------------------------------------
 
@@ -276,7 +280,7 @@ services:
         condition: service_healthy
 
   auth:
-    image: ghcr.io/datalens-tech/datalens-auth:0.27.0            # upstream (no fork)
+    image: ghcr.io/datalens-tech/datalens-auth:0.34.0            # upstream (no fork); 0.27.0 no longer starts — see docs/research/mcp-http-deployment-and-account-provisioning.md §4.5
     restart: unless-stopped
     logging: *logging
     healthcheck:                                   # Node image -> use node; /ping = routes.ts
@@ -352,6 +356,53 @@ services:
       # WITHOUT this, published public links / embeds return 401 on their DATA. The Share
       # feature stays off by default, so supplying this key exposes nothing on its own.
       - AUTH_TOKEN_PRIVATE_KEY=${AUTH_TOKEN_PRIVATE_KEY:?}                        # multiline; matches auth TOKEN_PRIVATE_KEY
+    depends_on:
+      - us
+
+  # Read-only MCP server (Streamable HTTP). Second public entrypoint, sharing the
+  # ui domain under /mcp. Source: ../datalens-mcp; see its README for the tools.
+  mcp:
+    image: ghcr.io/factory-director-team/datalens-mcp:${FORK_TAG_MCP:-latest}
+    restart: unless-stopped
+    logging: *logging
+    healthcheck:
+      # node:24-alpine ships no curl. Coolify will NOT route to an unhealthy
+      # service — and because /mcp is a path on ui's domain, a failing healthcheck
+      # shows up as ui's HTML on /mcp rather than an error. Check here first.
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/healthz',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    environment:
+      # ---- PUBLIC ENTRYPOINT: <ui domain>/mcp -> mcp:3000 ----
+      # The UI identifier is reused on purpose: generated values "are reusable
+      # across services", so this pins the route to the SAME domain `ui` got,
+      # while `_3000=/mcp` adds the path and the target port.
+      # If a deploy ever lands this on its own subdomain instead, set the domain
+      # by hand in the Coolify UI and update DATALENS_MCP_ALLOWED_HOSTS to match.
+      - SERVICE_FQDN_UI_3000=/mcp
+      - DATALENS_US_URL=http://us:8080
+      - DATALENS_DATA_API_URL=http://data-api:8080
+      - DATALENS_CONTROL_API_URL=http://control-api:8080
+      - DATALENS_MCP_HTTP_HOST=0.0.0.0
+      - DATALENS_MCP_HTTP_PORT=3000
+      # Host arrives from Traefik as the public domain; validation is port-agnostic.
+      - DATALENS_MCP_ALLOWED_HOSTS=${SERVICE_FQDN_UI}
+      - DATALENS_MCP_ALLOWED_ORIGINS=${SERVICE_URL_UI}
+      # One `label:token` per consumer, comma/newline separated — removing a line
+      # revokes exactly that caller. REQUIRED: this is the only barrier in front
+      # of every dataset the server can read.
+      - DATALENS_MCP_BEARERS=${DATALENS_MCP_BEARERS:?}
+      # Identity the server signs its platform token as. BARE encoded id — US adds
+      # the `uid:` prefix itself when recording authorship. Required: a default
+      # here would silently attribute reads to a non-existent user.
+      - DATALENS_IDENTITY_USER_ID=${DATALENS_MCP_IDENTITY_USER_ID:?}
+      - DATALENS_IDENTITY_ROLES=${DATALENS_MCP_IDENTITY_ROLES:-datalens.admin}
+      # Direct-sign: the server mints its own PS256 platform token with the
+      # instance key, exactly as the ui BFF does for public links.
+      - DATALENS_AUTH_TOKEN_PRIVATE_KEY=${AUTH_TOKEN_PRIVATE_KEY:?}               # multiline; matches auth TOKEN_PRIVATE_KEY
+      - DATALENS_MCP_LOG_LEVEL=${DATALENS_MCP_LOG_LEVEL:-info}
     depends_on:
       - us
 
