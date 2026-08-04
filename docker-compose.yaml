@@ -214,7 +214,7 @@ services:
   #
   auth:
     container_name: datalens-auth
-    image: ghcr.io/datalens-tech/datalens-auth:0.27.0
+    image: ghcr.io/datalens-tech/datalens-auth:0.34.0
     environment:
       APP_INSTALLATION: opensource
       APP_ENV: prod

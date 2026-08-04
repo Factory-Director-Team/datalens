@@ -172,7 +172,7 @@ services:
     build:
       context: ./dev/nodejs
       args:
-        - image=ghcr.io/datalens-tech/datalens-auth:0.27.0
+        - image=ghcr.io/datalens-tech/datalens-auth:0.34.0
     tty: true
     user: ${USER_DEV:-app}
     environment:
