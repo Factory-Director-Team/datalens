@@ -385,6 +385,10 @@ services:
       - DATALENS_US_URL=http://us:8080
       - DATALENS_DATA_API_URL=http://data-api:8080
       - DATALENS_CONTROL_API_URL=http://control-api:8080
+      # The ui BFF — the fourth internal API, and the only one reached by cookie
+      # rather than bearer. Required by the chart tools; the server signs that
+      # cookie with AUTH_TOKEN_PRIVATE_KEY below. See ADR-0008.
+      - DATALENS_UI_URL=http://ui:8080
       - DATALENS_MCP_HTTP_HOST=0.0.0.0
       - DATALENS_MCP_HTTP_PORT=3000
       # Host arrives from Traefik as the public domain; validation is port-agnostic.
@@ -392,7 +396,9 @@ services:
       - DATALENS_MCP_ALLOWED_ORIGINS=${SERVICE_URL_UI}
       # One `label:token` per consumer, comma/newline separated — removing a line
       # revokes exactly that caller. REQUIRED: this is the only barrier in front
-      # of every dataset the server can read.
+      # of every dataset the server can read — and, since the chart tools write,
+      # in front of everything it can change. Treat a bearer as an administrative
+      # credential (ADR-0008).
       - DATALENS_MCP_BEARERS=${DATALENS_MCP_BEARERS:?}
       # Identity the server signs its platform token as. BARE encoded id — US adds
       # the `uid:` prefix itself when recording authorship. Required: a default
@@ -405,6 +411,7 @@ services:
       - DATALENS_MCP_LOG_LEVEL=${DATALENS_MCP_LOG_LEVEL:-info}
     depends_on:
       - us
+      - ui
 
 volumes:
   db-postgres:

@@ -66,6 +66,10 @@ services:
       DATALENS_US_URL: http://us:8080
       DATALENS_DATA_API_URL: http://data-api:8080
       DATALENS_CONTROL_API_URL: http://control-api:8080
+      # The ui BFF — the fourth internal API, needed by the chart tools. It is
+      # the only one reached by cookie rather than bearer; the server signs that
+      # cookie with the key below. See ADR-0008.
+      DATALENS_UI_URL: http://ui:8080
       # Identity the server acts as. Default = the pre-seeded admin of the
       # 2026-04 db-postgres volume (see the runbook for how to look it up).
       # BARE id, no `uid:` prefix — United Storage adds that itself when it
