@@ -381,7 +381,6 @@ services:
       # while `_3000=/mcp` adds the path and the target port.
       # If a deploy ever lands this on its own subdomain instead, set the domain
       # by hand in the Coolify UI and update DATALENS_MCP_ALLOWED_HOSTS to match.
-      - SERVICE_FQDN_UI_3000=/mcp
       - DATALENS_US_URL=http://us:8080
       - DATALENS_DATA_API_URL=http://data-api:8080
       - DATALENS_CONTROL_API_URL=http://control-api:8080
