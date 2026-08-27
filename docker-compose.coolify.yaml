@@ -408,6 +408,11 @@ services:
       # instance key, exactly as the ui BFF does for public links.
       - DATALENS_AUTH_TOKEN_PRIVATE_KEY=${AUTH_TOKEN_PRIVATE_KEY:?}               # multiline; matches auth TOKEN_PRIVATE_KEY
       - DATALENS_MCP_LOG_LEVEL=${DATALENS_MCP_LOG_LEVEL:-info}
+      # Confine the server to a list of workbook ids, comma-separated. Empty (the
+      # default) means no restriction. Reads are refused by DataLens itself
+      # through the X-DL-WorkbookId header; writes and anything through the ui
+      # BFF are checked by the MCP server. See ADR-0009.
+      - DATALENS_MCP_ALLOWED_WORKBOOKS=${DATALENS_MCP_ALLOWED_WORKBOOKS:-}
     depends_on:
       - us
       - ui
