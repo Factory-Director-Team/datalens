@@ -70,6 +70,8 @@ services:
       # the only one reached by cookie rather than bearer; the server signs that
       # cookie with the key below. See ADR-0008.
       DATALENS_UI_URL: http://ui:8080
+      # Required when the public UI's SSO registry is enabled; matches SSO_MACHINE_TOKEN.
+      DATALENS_BFF_MACHINE_TOKEN: ${SSO_MACHINE_TOKEN:-}
       # Identity the server acts as. Default = the pre-seeded admin of the
       # 2026-04 db-postgres volume (see the runbook for how to look it up).
       # BARE id, no `uid:` prefix — United Storage adds that itself when it

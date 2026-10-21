@@ -1,0 +1,38 @@
+# Opt-in overlay. Build the UI image from the SSO implementation before enabling it.
+# docker compose -f docker-compose.yaml -f docker-compose.sso.yaml up -d
+services:
+  ui:
+    image: ${SSO_UI_IMAGE:?Set SSO_UI_IMAGE to the built SSO UI image}
+    environment:
+      AUTH_ENABLED: 'true'
+      SSO_ENABLED: 'true'
+      SSO_HOST_ORIGIN: ${SSO_HOST_ORIGIN:?Set the exact HTTPS host origin}
+      SSO_BI_ORIGIN: ${SSO_BI_ORIGIN:?Set the exact HTTPS BI origin}
+      SSO_TICKET_ISSUER: ${SSO_TICKET_ISSUER:?Set the ticket issuer}
+      SSO_TICKET_AUDIENCE: ${SSO_TICKET_AUDIENCE:?Set the ticket audience}
+      SSO_TICKET_PUBLIC_KEY: ${SSO_TICKET_PUBLIC_KEY:?Set the dedicated ticket public key}
+      SSO_VERIFICATION_URL: ${SSO_VERIFICATION_URL:?Set the private host verification endpoint}
+      SSO_SERVICE_TOKEN: ${SSO_SERVICE_TOKEN:?Set the host verification service credential}
+      SSO_SHARED_LOGIN: ${SSO_SHARED_LOGIN:?Set the existing shared account login}
+      SSO_SHARED_PASSWORD: ${SSO_SHARED_PASSWORD:?Set the shared account password}
+      SSO_SHARED_USER_ID: ${SSO_SHARED_USER_ID:?Set the encoded shared account user ID}
+      SSO_REDIS_URL: redis://sso-registry:6379
+      SSO_MACHINE_TOKEN: ${SSO_MACHINE_TOKEN:-}
+      SSO_MACHINE_USER_ID: ${SSO_MACHINE_USER_ID:-}
+    depends_on:
+      sso-registry: {condition: service_healthy}
+  auth:
+    environment:
+      UI_APP_ENDPOINT: ${SSO_BI_ORIGIN:?Set the exact HTTPS BI origin}
+      DISABLE_WILDCARD_COOKIE: 'true'
+  sso-registry:
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, 'yes', --appendfsync, always, --maxmemory-policy, noeviction]
+    volumes: [sso-registry:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      retries: 10
+    networks: [default]
+volumes:
+  sso-registry:
