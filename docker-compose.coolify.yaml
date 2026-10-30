@@ -351,6 +351,20 @@ services:
       - AUTH_MASTER_TOKEN=${SERVICE_PASSWORD_AUTHMASTERTOKEN}
       - AUTH_TOKEN_PUBLIC_KEY=${AUTH_TOKEN_PUBLIC_KEY:?}                          # multiline
       - AUTH_SIGNUP_DISABLED=${AUTH_SIGNUP_DISABLED:-false}
+      # Optional iframe SSO. Enable only after configuring both HTTPS origins and the shared account.
+      - SSO_ENABLED=${SSO_ENABLED:-false}
+      - SSO_HOST_ORIGIN=${SSO_HOST_ORIGIN:-}
+      - SSO_HOST_ORIGIN_FILE=${SSO_HOST_ORIGIN_FILE:-}
+      - SSO_BI_ORIGIN=${SSO_BI_ORIGIN:-}
+      - SSO_BI_ORIGIN_FILE=${SSO_BI_ORIGIN_FILE:-}
+      - SSO_VERIFICATION_URL=${SSO_VERIFICATION_URL:-https://dev-ahmad.factorydirector.pro/api/v1/bi/verify}
+      - SSO_VERIFICATION_URL_FILE=${SSO_VERIFICATION_URL_FILE:-}
+      - SSO_SHARED_LOGIN=${SSO_SHARED_LOGIN:-}
+      - SSO_SHARED_LOGIN_FILE=${SSO_SHARED_LOGIN_FILE:-}
+      - SSO_SHARED_PASSWORD=${SSO_SHARED_PASSWORD:-}
+      - SSO_SHARED_PASSWORD_FILE=${SSO_SHARED_PASSWORD_FILE:-}
+      - SSO_SHARED_USER_ID=${SSO_SHARED_USER_ID:-}
+      - SSO_SHARED_USER_ID_FILE=${SSO_SHARED_USER_ID_FILE:-}
       # Private half of the platform auth keypair — lets the BFF sign the anonymous
       # public-link/embed data-api query so data-api accepts it under AUTH_TYPE=NATIVE.
       # WITHOUT this, published public links / embeds return 401 on their DATA. The Share

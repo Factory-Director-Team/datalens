@@ -8,7 +8,8 @@ services:
       SSO_ENABLED: 'true'
       SSO_HOST_ORIGIN: ${SSO_HOST_ORIGIN:?Set the exact HTTPS host origin}
       SSO_BI_ORIGIN: ${SSO_BI_ORIGIN:?Set the exact HTTPS BI origin}
-      SSO_VERIFICATION_URL: ${SSO_VERIFICATION_URL:?Set the host bearer verification endpoint}
+      SSO_VERIFICATION_URL: ${SSO_VERIFICATION_URL:-https://dev-ahmad.factorydirector.pro/api/v1/bi/verify}
+      SSO_VERIFICATION_URL_FILE: ${SSO_VERIFICATION_URL_FILE:-}
       SSO_SHARED_LOGIN: ${SSO_SHARED_LOGIN:?Set the existing shared account login}
       SSO_SHARED_PASSWORD: ${SSO_SHARED_PASSWORD:?Set the shared account password}
       SSO_SHARED_USER_ID: ${SSO_SHARED_USER_ID:?Set the encoded shared account user ID}
